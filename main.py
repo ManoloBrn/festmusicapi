@@ -146,13 +146,12 @@ def favorite_band(user_id, festival_id):
 
     return jsonify({"message": "Band favorite status updated successfully"})
 
-
-
 @app.route('/users/<user_id>/<festival_id>/schedule', methods=['GET'])
 def get_user_schedule(user_id, festival_id):
     user_ref = db.collection("users").document(user_id)
+    user = user_ref.get()
 
-    if not user_ref.get().exists:
+    if not user.exists:
         return jsonify({"error": "User not found"}), 404
 
     festival_ref = db.collection("festivals").document(festival_id)
@@ -173,9 +172,18 @@ def get_user_schedule(user_id, festival_id):
         "presentations": []
     }
 
-    user_following = user_ref.get().to_dict().get("following", [])
+    user_following = user.to_dict().get("following", [])
 
-    for presentation in festival.to_dict()["presentations"]:
+    followed_users_festival_data = {}
+    for followed_user in user_following:
+        followed_user_id = followed_user["user_id"]
+        followed_user_festival_ref = db.collection("users").document(followed_user_id).collection("festivals").document(festival_id)
+        followed_user_festival = followed_user_festival_ref.get()
+
+        if followed_user_festival.exists:
+            followed_users_festival_data[followed_user_id] = followed_user_festival.to_dict()
+
+    for presentation in festival_details["presentations"]:
         user_presentation = {
             "presentation_day": presentation["presentation_day"],
             "bands": []
@@ -194,19 +202,147 @@ def get_user_schedule(user_id, festival_id):
                 "following": []
             }
 
-            for followed_user in user_following:
-                followed_user_ref = db.collection("users").document(followed_user["user_id"])
-                followed_user_festival_ref = followed_user_ref.collection("festivals").document(festival_id)
-                followed_user_festival = followed_user_festival_ref.get()
+            for user_id, followed_user_festival in followed_users_festival_data.items():
+                followed_user_favorite_bands = followed_user_festival.get("favorite_bands", [])
 
-                if followed_user_festival.exists:
-                    followed_user_favorite_bands = followed_user_festival.to_dict().get("favorite_bands", [])
-
-                    if {"presentation_day": presentation["presentation_day"], "band_id": band_id} in followed_user_favorite_bands:
+                if {"presentation_day": presentation["presentation_day"], "band_id": band_id} in followed_user_favorite_bands:
+                    followed_user = next((u for u in user_following if u["user_id"] == user_id), None)
+                    if followed_user:
                         band_data["following"].append({
-                            "user_id": followed_user["user_id"],
+                            "user_id": user_id,
                             "username": followed_user["username"]
                         })
+
+            user_presentation["bands"].append(band_data)
+
+        schedule["presentations"].append(user_presentation)
+
+    return jsonify(schedule)
+
+    user_ref = db.collection("users").document(user_id)
+    user = user_ref.get()
+
+    if not user.exists:
+        return jsonify({"error": "User not found"}), 404
+
+    festival_ref = db.collection("festivals").document(festival_id)
+    festival = festival_ref.get()
+
+    if not festival.exists:
+        return jsonify({"error": "Festival not found"}), 404
+
+    user_festival_ref = user_ref.collection("festivals").document(festival_id)
+    user_festival = user_festival_ref.get()
+
+    favorite_bands = user_festival.to_dict().get("favorite_bands", []) if user_festival.exists else []
+    festival_details = festival.to_dict()
+    schedule = {
+        "festival_id": festival_id,
+        "festival_name": festival_details.get("festival_name", ""),
+        "festival_dates": festival_details.get("dates", []),
+        "presentations": []
+    }
+
+    user_following = user.to_dict().get("following", [])
+    followed_users_ids = [u["user_id"] for u in user_following]
+
+    followed_users_festivals = db.collection_group("festivals").where("festival_id", "==", festival_id).stream()
+    followed_users_festival_data = {doc.reference.parent.parent.id: doc.to_dict() for doc in followed_users_festivals if doc.reference.parent.parent.id in followed_users_ids}
+
+    for presentation in festival_details["presentations"]:
+        user_presentation = {
+            "presentation_day": presentation["presentation_day"],
+            "bands": []
+        }
+
+        for band in presentation["bands"]:
+            band_id = band["band_id"]
+
+            band_data = {
+                "band_id": band_id,
+                "band_name": band["band_name"],
+                "start_time": band["start_time"].isoformat(),
+                "end_time": band["end_time"].isoformat(),
+                "stage": band["scenario"],
+                "favorite": {"presentation_day": presentation["presentation_day"], "band_id": band_id} in favorite_bands,
+                "following": []
+            }
+
+            for user_id, followed_user_festival in followed_users_festival_data.items():
+                followed_user_favorite_bands = followed_user_festival.get("favorite_bands", [])
+
+                if {"presentation_day": presentation["presentation_day"], "band_id": band_id} in followed_user_favorite_bands:
+                    followed_user = next((u for u in user_following if u["user_id"] == user_id), None)
+                    if followed_user:
+                        band_data["following"].append({
+                            "user_id": user_id,
+                            "username": followed_user["username"]
+                        })
+
+            user_presentation["bands"].append(band_data)
+
+        schedule["presentations"].append(user_presentation)
+
+    return jsonify(schedule)
+
+    user_ref = db.collection("users").document(user_id)
+    user = user_ref.get()
+
+    if not user.exists:
+        return jsonify({"error": "User not found"}), 404
+
+    festival_ref = db.collection("festivals").document(festival_id)
+    festival = festival_ref.get()
+
+    if not festival.exists:
+        return jsonify({"error": "Festival not found"}), 404
+
+    user_festival_ref = user_ref.collection("festivals").document(festival_id)
+    user_festival = user_festival_ref.get()
+
+    favorite_bands = user_festival.to_dict().get("favorite_bands", []) if user_festival.exists else []
+    festival_details = festival.to_dict()
+    schedule = {
+        "festival_id": festival_id,
+        "festival_name": festival_details.get("festival_name", ""),
+        "festival_dates": festival_details.get("dates", []),
+        "presentations": []
+    }
+
+    user_following = user.to_dict().get("following", [])
+    followed_users_usernames = [u["username"] for u in user_following]
+
+    followed_users_festivals = db.collection_group("festivals").where("festival_id", "==", festival_id).stream()
+    followed_users_festival_data = {doc.reference.parent.parent.id: doc.to_dict() for doc in followed_users_festivals if doc.reference.parent.parent.get().to_dict()["username"] in followed_users_usernames}
+
+    for presentation in festival_details["presentations"]:
+        user_presentation = {
+            "presentation_day": presentation["presentation_day"],
+            "bands": []
+        }
+
+        for band in presentation["bands"]:
+            band_id = band["band_id"]
+
+            band_data = {
+                "band_id": band_id,
+                "band_name": band["band_name"],
+                "start_time": band["start_time"].isoformat(),
+                "end_time": band["end_time"].isoformat(),
+                "stage": band["scenario"],
+                "favorite": {"presentation_day": presentation["presentation_day"], "band_id": band_id} in favorite_bands,
+                "following": []
+            }
+
+            for user_id, followed_user_festival in followed_users_festival_data.items():
+                followed_user_favorite_bands = followed_user_festival.get("favorite_bands", [])
+
+                if {"presentation_day": presentation["presentation_day"], "band_id": band_id} in followed_user_favorite_bands:
+                    followed_user = db.collection("users").document(user_id).get().to_dict()
+                    band_data["following"].append({
+                        "user_id": user_id,
+                        "username": followed_user["username"]
+                    })
 
             user_presentation["bands"].append(band_data)
 
